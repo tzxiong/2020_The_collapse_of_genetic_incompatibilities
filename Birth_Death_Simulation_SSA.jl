@@ -2,7 +2,7 @@
 ## note: SSAstepper is an accurate simulator but it is significantly slower than the TauLeap method. 
 ## should only be used for one trajectory or a small population
 
-using Plots;pyplot()
+using Plots;gr()
 using DifferentialEquations # at least compatible with DifferentialEquations.jl v6.16
 using DifferentialEquations.EnsembleAnalysis
 # using JLD
