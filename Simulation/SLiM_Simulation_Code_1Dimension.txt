@@ -1,0 +1,511 @@
+initialize() {
+	
+		initializeSLiMModelType("nonWF");
+	
+	// working directory
+	if (!exists("dir")) {defineConstant("dir", "/PATH/TO/OUTPUT");}
+	// source directory (for loading .tree files, usually for burn-in)
+	if (!exists("dir_source")) {defineConstant("dir_source", "/PATH/TO/SOURCE");}
+	// .tree file name
+	if (!exists("treeSeqFileName")) {defineConstant("treeSeqFileName", "slim_seed4358787672556_gen999500.trees");}
+	
+//	setSeed(1774417562823);
+	
+	// chromosome length (at most 10 independent loci involved in DMI)
+	if (!exists("L_chr")) {defineConstant("L_chr",asInteger(1));}
+	// number of chromosomes
+	if (!exists("n_chr")) {defineConstant("n_chr",10);}
+	// total genome length
+	if (!exists("L")) {defineConstant("L",asInteger(L_chr * n_chr));}
+	// reproduction rate (lambda: Expected offspring number per reproducing individual)
+	if (!exists("lambda")) {defineConstant("lambda",1.5);}
+	// density-regulation factor
+	if (!exists("K")) {defineConstant("K",200);}
+	// migration probability
+	if (!exists("m")) {defineConstant("m",0.1);}
+	// hybridization probability
+	if (!exists("h")) {defineConstant("h",0.05);}
+	// mutation probability per site per generation
+	if (!exists("mut_rate")) {defineConstant("mut_rate",3*1e-7);}
+	
+	// population structure:
+	// n0: the number of overlapped demes
+	// n1: the number of demes unique to species 1
+	// n2: the number of demes unique to species 2
+	// the structure looks like:
+	// 1,1,1,...,1 (n1 counts),0,0,0,...,0 (n0 counts, with hybridization),2,2,2,...,2 (n2 counts)
+	if (!exists("n0")) {defineConstant("n0",5);}
+	if (!exists("n1")) {defineConstant("n1",250);}
+	if (!exists("n2")) {defineConstant("n2",250);}
+	// number of total populations, has to be an even number >=4 !
+	if (!exists("nTotal")) {defineConstant("nTotal",2*n0+n1+n2);}
+
+	// simulation control
+	// seed used to run the model
+	if (!exists("simID")) {defineConstant("simID",getSeed());}
+	// number of generations between two treeseq simplification events
+	if (!exists("simplificationCycle")) {defineConstant("simplificationCycle",100);}
+	// number of generations between two output events
+	if (!exists("outputCycle")) {defineConstant("outputCycle",50);}
+	
+	// initialize recombination rates
+	rates=c(0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5);
+	ends=c(1,2,3,4,5,6,7,8,9);
+	
+	initializeRecombinationRate(rates,ends);
+	
+	initializeMutationRate(0.0);
+	
+	initializeMutationType("m1", 0.5, "f", 0.0); // neutral mutations
+	initializeMutationType("m2", 0.5, "f", 0.0); // non-neutral mutation
+	initializeMutationType("m3", 0.5, "f", 0.0); // non-neutral mutation
+	initializeMutationType("m4", 0.5, "f", 0.0); // non-neutral mutation
+	initializeMutationType("m5", 0.5, "f", 0.0); // non-neutral mutation
+	initializeMutationType("m6", 0.5, "f", 0.0); // non-neutral mutation
+	m1.color = "yellow";
+	m2.color = "red";
+	m3.color = "blue";
+	m4.color = "green";
+	m5.color = "brown";
+	m6.color = "purple";
+	m1.convertToSubstitution = F;
+	m2.convertToSubstitution = F;
+	m3.convertToSubstitution = F;
+	m4.convertToSubstitution = F;
+	m5.convertToSubstitution = F;
+	m6.convertToSubstitution = F;
+	initializeGenomicElementType("g1", m1, 1.0);
+	initializeGenomicElement(g1, 0, L-1);
+	
+	
+	//	initializeTreeSeq;
+//	initializeTreeSeq(simplificationRatio=INF);
+
+}
+
+// reproduction rules (monoecious individuals)
+reproduction() {
+
+	pop_index_sp1_unique = 0:(n1-1);
+	pop_index_sp2_unique = (n1+2*n0):(nTotal-1);
+	pop_index_sp1_overlapped = n1:(n1+n0-1);
+	pop_index_sp2_overlapped = (n1+n0):(n1+2*n0-1);
+	
+	
+	// reproduction rule for populations out of the contact zone
+	for (i in c(pop_index_sp1_unique,pop_index_sp2_unique)) {
+		pop = sim.subpopulations[i];
+		if (pop.individualCount >= 1) {		
+			// return the offspring numbers
+			n_offsprings = rpois(1,pop.individualCount * lambda);			
+			if (n_offsprings >= 1) {
+				mate1 = pop.sampleIndividuals(n_offsprings,replace = T);
+				mate2 = pop.sampleIndividuals(n_offsprings,replace = T);
+				for (i in 0:(n_offsprings-1)){
+					pop.addCrossed(mate1[i],mate2[i]);
+				}
+			}
+		
+		}
+	}
+	
+	// reproduction rule for populations of sp1 in the contact zone
+	for (i in pop_index_sp1_overlapped) {
+		pop1 = sim.subpopulations[i];
+		pop2 = sim.subpopulations[i+n0];
+		pop1_size = pop1.individualCount;
+		pop2_size = pop2.individualCount;
+		if (pop1_size >= 1) {		
+			// return the offspring numbers
+			n_offsprings = rpois(1,pop1_size * lambda);
+			if (n_offsprings >= 1) {
+				// number of hybrids within n offsprings
+				n_hybrids = rbinom(1,n_offsprings,h * pop2_size/(h * pop2_size + (1-h) * pop1_size));
+				mate1 = pop1.sampleIndividuals(n_offsprings,replace = T,minAge = 1);
+				mate2 = pop2_size >= 1 ? c(pop1.sampleIndividuals(n_offsprings-n_hybrids,replace = T,minAge = 1),pop2.sampleIndividuals(n_hybrids,replace = T,minAge = 1)) else pop1.sampleIndividuals(n_offsprings,replace = T,minAge = 1);
+				for (i in 0:(n_offsprings-1)){
+					pop1.addCrossed(mate1[i],mate2[i]);
+				}
+			}
+		
+		}
+	}
+	
+	// reproduction rule for populations of sp2 in the contact zone
+	for (i in pop_index_sp2_overlapped) {
+		pop1 = sim.subpopulations[i];
+		pop2 = sim.subpopulations[i-n0];
+		pop1_size = pop1.individualCount;
+		pop2_size = pop2.individualCount;
+		if (pop1_size >= 1) {		
+			// return the offspring numbers
+			n_offsprings = rpois(1,pop1_size * lambda);
+			if (n_offsprings >= 1) {
+				// number of hybrids within n offsprings
+				n_hybrids = rbinom(1,n_offsprings,h * pop2_size/(h * pop2_size + (1-h) * pop1_size));
+				mate1 = pop1.sampleIndividuals(n_offsprings,replace = T,minAge = 1);
+				mate2 = pop2_size >= 1 ? c(pop1.sampleIndividuals(n_offsprings-n_hybrids,replace = T,minAge = 1),pop2.sampleIndividuals(n_hybrids,replace = T,minAge = 1)) else pop1.sampleIndividuals(n_offsprings,replace = T,minAge = 1);
+				for (i in 0:(n_offsprings-1)){
+					pop1.addCrossed(mate1[i],mate2[i]);
+				}
+			}
+		
+		}
+	}
+	
+	
+	
+	// disable this callback for this generation
+	self.active = 0;
+}
+
+// define migration
+// migration is defined within each species
+// gene flow between species is modeled in the reproduction function
+
+function (void)execute_migration(void){
+		
+	// create migration
+	// index for the populations belonging to different species 0-based
+	pop_index_sp1 = 0:(n1+n0-1);
+	pop_index_sp2 = (n1+n0):(nTotal-1);
+		
+	// migrate the first species
+	Migrants = c(); //array of every migrants
+	Dests = c(); //array of destinations for each migrant
+		
+	for (i in pop_index_sp1) {
+		//sample migrants from each population
+		nIndividuals = sim.subpopulations[i].individualCount;
+		nMigrants = nIndividuals >= 1 ? rbinom(1, sim.subpopulations[i].individualCount, m) else 0;
+		migrants = nMigrants >= 1 ? sample(sim.subpopulations[i].individuals, nMigrants) else NULL;
+		Migrants = isNULL(migrants) ? Migrants else c(Migrants,migrants);
+		//sample destinations for each migrant
+		if (nMigrants >= 1) {
+			for (j in 1:nMigrants) {
+				dest = ((i==pop_index_sp1[0]) ? sample(c(pop_index_sp1[0],pop_index_sp1[1]),1) else ((i==pop_index_sp1[size(pop_index_sp1)-1]) ? sample(c(pop_index_sp1[size(pop_index_sp1)-1],pop_index_sp1[size(pop_index_sp1)-2]),1) else sample(c(i+1,i-1),1)));
+				Dests = c(Dests,dest);
+			}
+		}
+	}
+		
+	if (size(Dests)>=1) {
+		//print(Migrants);
+		//print(Dests+1);
+		for (i in 0:(size(Dests)-1)) {
+			sim.subpopulations[Dests[i]].takeMigrants(Migrants[i]);
+		}
+	}
+		
+	// migrate the second species
+	Migrants = c(); //array of every migrants
+	Dests = c(); //array of destinations for each migrant
+		
+	for (i in pop_index_sp2) {
+		//sample migrants from each population
+		nIndividuals = sim.subpopulations[i].individualCount;
+		nMigrants = nIndividuals >= 1 ? rbinom(1, sim.subpopulations[i].individualCount, m) else 0;
+		migrants = nMigrants >= 1 ? sample(sim.subpopulations[i].individuals, nMigrants) else NULL;
+		Migrants = isNULL(migrants) ? Migrants else c(Migrants,migrants);
+		//sample destinations for each migrant
+		if (nMigrants >= 1) {
+			for (j in 1:nMigrants) {
+				dest = ((i==pop_index_sp2[0]) ? sample(c(pop_index_sp2[0],pop_index_sp2[1]),1) else ((i==pop_index_sp2[size(pop_index_sp2)-1]) ? sample(c(pop_index_sp2[size(pop_index_sp2)-1],pop_index_sp2[size(pop_index_sp2)-2]),1) else sample(c(i+1,i-1),1)));
+				Dests = c(Dests,dest);
+			}
+		}
+	}
+		
+	if (size(Dests)>=1) {
+		//print(Migrants);
+		//print(Dests+1);
+		for (i in 0:(size(Dests)-1)) {
+			sim.subpopulations[Dests[i]].takeMigrants(Migrants[i]);
+		}
+	}
+}
+	
+
+
+function (void)calculate_fitness_density_dependent_only(void){
+	
+	for (i in 1:nTotal) {
+		pop = sim.subpopulations[i-1];
+		children = pop.subsetIndividuals(maxAge=0);
+		parents = pop.subsetIndividuals(minAge=1);
+		// density-dependent viability selection
+		densityS = size(children)/K;
+		children.fitnessScaling = exp(-densityS);
+		parents.fitnessScaling = 0;
+	}
+	
+}
+
+
+
+function (void)calculate_fitness_two_loci(void){
+	
+// **** Model I ****
+// strong selection against dosage-imbalance
+//for (i in 1:nTotal) {
+//	pop = sim.subpopulations[i-1];
+//	children = pop.subsetIndividuals(maxAge=0);
+//	parents = pop.subsetIndividuals(minAge=1);
+//	n_m2 = children.genome1.countOfMutationsOfType(m2)+children.genome2.countOfMutationsOfType(m2);
+//	n_m3 = children.genome1.countOfMutationsOfType(m3)+children.genome2.countOfMutationsOfType(m3);
+//	W = asInteger(n_m2 == n_m3);
+//	// density-dependent viability selection
+//	densityS = size(children)/K;
+//	children.fitnessScaling = exp(-densityS) * W;
+//	parents.fitnessScaling = 0;
+//}
+
+// **** Additional Model (two-locus version of Model IV) ***
+//	// strong selection against simultaneous heterozygotes
+//	for (i in 1:nTotal) {
+//		pop = sim.subpopulations[i-1];
+//		children = pop.subsetIndividuals(maxAge=0);
+//		parents = pop.subsetIndividuals(minAge=1);
+//		n_m2 = children.genome1.countOfMutationsOfType(m2)+children.genome2.countOfMutationsOfType(m2);
+//		n_m3 = children.genome1.countOfMutationsOfType(m3)+children.genome2.countOfMutationsOfType(m3);
+//		W = (1 - 0.75*asInteger((n_m2 == 1) & (n_m3 == 1)));
+//		// density-dependent viability selection
+//		densityS = size(children)/K;
+//		children.fitnessScaling = exp(-densityS) * W;
+//		parents.fitnessScaling = 0;
+//
+//	}
+
+// **** Additional Model (two-locus version of Model III) ***
+//	// strong selection against simultaneous pseudogenes (m2 and \bar{m3})
+//	for (i in 1:nTotal) {
+//		pop = sim.subpopulations[i-1];
+//		children = pop.subsetIndividuals(maxAge=0);
+//		parents = pop.subsetIndividuals(minAge=1);
+//		n_m2 = children.genome1.countOfMutationsOfType(m2)+children.genome2.countOfMutationsOfType(m2);
+//		n_m3 = children.genome1.countOfMutationsOfType(m3)+children.genome2.countOfMutationsOfType(m3);
+//		W = (1 - 0.75*asInteger((n_m2 == 2) & (n_m3 == 0)));
+//		// density-dependent viability selection
+//		densityS = size(children)/K;
+//		children.fitnessScaling = exp(-densityS) * W;
+//		parents.fitnessScaling = 0;
+//
+//	}
+
+// **** Model II ***
+	// strong selection against dominant two-loci interaction (m2 and \bar{m3})
+	for (i in 1:nTotal) {
+		pop = sim.subpopulations[i-1];
+		children = pop.subsetIndividuals(maxAge=0);
+		parents = pop.subsetIndividuals(minAge=1);
+		n_m2 = children.genome1.countOfMutationsOfType(m2)+children.genome2.countOfMutationsOfType(m2);
+		n_m3 = children.genome1.countOfMutationsOfType(m3)+children.genome2.countOfMutationsOfType(m3);
+		W = (1 - 0.75*asInteger((n_m2 > 0) & (n_m3 < 2)));
+		// density-dependent viability selection
+		densityS = size(children)/K;
+		children.fitnessScaling = exp(-densityS) * W;
+		parents.fitnessScaling = 0;
+
+	}
+
+// **** Model III ***
+// strong selection against simultaneous pseudogenes (m2, m3, \bar{m4},\bar{m5}})
+// for (i in 1:nTotal) {
+// 	pop = sim.subpopulations[i-1];
+// 	children = pop.subsetIndividuals(maxAge=0);
+// 	parents = pop.subsetIndividuals(minAge=1);
+// 	n_m2 = children.genome1.countOfMutationsOfType(m2)+children.genome2.countOfMutationsOfType(m2);
+// 	n_m3 = children.genome1.countOfMutationsOfType(m3)+children.genome2.countOfMutationsOfType(m3);
+// 	n_m4 = children.genome1.countOfMutationsOfType(m4)+children.genome2.countOfMutationsOfType(m4);
+// 	n_m5 = children.genome1.countOfMutationsOfType(m5)+children.genome2.countOfMutationsOfType(m5);
+// 	W = (1 - 0.75*asInteger((n_m2 == 2) & (n_m3 == 2) & (n_m4 == 0) & (n_m5 == 0)));
+// 	// density-dependent viability selection
+// 	densityS = size(children)/K;
+// 	children.fitnessScaling = exp(-densityS) * W;
+// 	parents.fitnessScaling = 0;
+// }
+
+// **** Model IV ****
+	// strong selection against simultaneous disruptions to two regulatory modules
+//	for (i in 1:nTotal) {
+//		pop = sim.subpopulations[i-1];
+//		children = pop.subsetIndividuals(maxAge=0);
+//		parents = pop.subsetIndividuals(minAge=1);
+//		n_m2 = children.genome1.countOfMutationsOfType(m2)+children.genome2.countOfMutationsOfType(m2);
+//		n_m3 = children.genome1.countOfMutationsOfType(m3)+children.genome2.countOfMutationsOfType(m3);
+//		n_m4 = children.genome1.countOfMutationsOfType(m4)+children.genome2.countOfMutationsOfType(m4);
+//		n_m5 = children.genome1.countOfMutationsOfType(m5)+children.genome2.countOfMutationsOfType(m5);
+//		W = (1 - 0.75*asInteger(((n_m2 == 1)|(n_m3 == 1)) & ((n_m4 == 1)|(n_m5 == 1))));
+//		// density-dependent viability selection
+//		densityS = size(children)/K;
+//		children.fitnessScaling = exp(-densityS) * W;
+//		parents.fitnessScaling = 0;
+//
+//	}
+
+// **** A slightly different version of Model IV (F1 becomes fully viable) ****
+// strong selection against simultaneous disruptions to two regulatory modules, no F1 dysfunction
+// for (i in 1:nTotal) {
+// 	pop = sim.subpopulations[i-1];
+// 	children = pop.subsetIndividuals(maxAge=0);
+// 	parents = pop.subsetIndividuals(minAge=1);
+// 	n_m2 = children.genome1.countOfMutationsOfType(m2)+children.genome2.countOfMutationsOfType(m2);
+// 	n_m3 = children.genome1.countOfMutationsOfType(m3)+children.genome2.countOfMutationsOfType(m3);
+// 	n_m4 = children.genome1.countOfMutationsOfType(m4)+children.genome2.countOfMutationsOfType(m4);
+// 	n_m5 = children.genome1.countOfMutationsOfType(m5)+children.genome2.countOfMutationsOfType(m5);
+// 	W = (1 - 1.0*asInteger((n_m2 != n_m3) & (n_m4 != n_m5)));
+// 	// density-dependent viability selection
+// 	densityS = size(children)/K;
+// 	children.fitnessScaling = exp(-densityS) * W;
+// 	parents.fitnessScaling = 0;
+// }
+	
+}
+
+
+
+
+
+
+function (void)execute_mutation(void){
+
+	// add m2,m3 to all individuals in species 1
+	pop_index_sp1 = 0:(n1+n0-1);
+	mut2 = sim.subpopulations[pop_index_sp1].individuals.genomes.addNewDrawnMutation(m2,2);	
+	mut3 = sim.subpopulations[pop_index_sp1].individuals.genomes.addNewDrawnMutation(m3,3);	
+	mut4 = sim.subpopulations[pop_index_sp1].individuals.genomes.addNewDrawnMutation(m4,4);
+	mut5 = sim.subpopulations[pop_index_sp1].individuals.genomes.addNewDrawnMutation(m5,5);		
+}
+
+function (void)output_counts(void){
+
+	gen = sim.generation;
+	diploid_count = sim.subpopulations.individualCount;
+	m2_count = c();
+	m3_count = c();
+    m4_count = c();
+    m5_count = c();
+	for (i in 1:nTotal) {m2_count = c(m2_count,sum(sim.subpopulations[i-1].genomes.countOfMutationsOfType(m2)));}
+	for (i in 1:nTotal) {m3_count = c(m3_count,sum(sim.subpopulations[i-1].genomes.countOfMutationsOfType(m3)));}	
+    for (i in 1:nTotal) {m4_count = c(m4_count,sum(sim.subpopulations[i-1].genomes.countOfMutationsOfType(m4)));}	
+    for (i in 1:nTotal) {m5_count = c(m5_count,sum(sim.subpopulations[i-1].genomes.countOfMutationsOfType(m5)));}	
+	line = 'Population'+'\t'+'IndividualCount'+'\t'+'m2_Count'+'\t'+'m3_Count'+'\t'+'m4_Count'+'\t'+'m5_Count'+'\n';
+	for (i in 0:(nTotal-1)) {line = line + asString(i+1) + '\t' + asString(diploid_count[i]) + '\t' + asString(m2_count[i]) + '\t' + asString(m3_count[i]) + '\t' + asString(m4_count[i]) + '\t' + asString(m5_count[i]) + '\n';}
+	writeFile(dir+"/output_seed_"+asString(simID)+"_n0_"+asString(n0)+"_n1_"+asString(n1)+"_n2_"+asString(n2)+"_K_"+asString(K)+"_lambda_"+asString(lambda)+"_m_"+asString(m)+"_h_"+asString(h)+"_gen_"+asString(gen)+".txt",line);
+	
+}
+
+
+
+
+
+
+// create the population
+1 early() {
+	
+	// ==================================
+	// Starting with every deme colonized
+	
+	// add sp1, indexed as 1,..,n0+n1
+	for (i in 1:(n1+n0)) {
+		sim.addSubpop(i,asInteger(log(lambda)*K));
+	}
+	
+	// add sp2, indexed as (1,..,n0+n2) .+ (n0+n1)
+	for (i in (n1+n0+1):nTotal) {
+		sim.addSubpop(i,asInteger(log(lambda)*K));
+	}
+
+	// ==================================
+	// starting with colonization from two ends
+
+//	// add sp1, indexed as 1,..,n0+n1
+//	for (i in 1:1) {
+//		sim.addSubpop(i,asInteger(log(lambda)*K));
+//	}
+//	
+//	for (i in 2:(n1+n0)) {
+//		sim.addSubpop(i,0);
+//	}
+//	
+//	// add sp2, indexed as (1,..,n0+n2) .+ (n0+n1)
+//	for (i in (n1+n0+1):(nTotal-1)) {
+//		sim.addSubpop(i,0);
+//	}	
+//	
+//	for (i in nTotal:nTotal) {
+//		sim.addSubpop(i,asInteger(log(lambda)*K));
+//	}	
+	
+	// ==================================
+	// starting with colonization from the center
+
+//	// add sp1, indexed as 1,..,n0+n1
+//	initial_pop_sp1 = ceil(n1+n0/2);
+//	
+//	for (i in 1:(n0+n1)) {
+//		sim.addSubpop(i,i == initial_pop_sp1 ? asInteger(log(lambda)*K) else 0);
+//	}
+//	
+//	
+//	// add sp2, indexed as (1,..,n0+n2) .+ (n0+n1)
+//	initial_pop_sp2 = initial_pop_sp1 + n0;
+//	for (i in (n1+n0+1):(nTotal)) {
+//		sim.addSubpop(i,i == initial_pop_sp2 ? asInteger(log(lambda)*K) else 0);
+//	}	
+
+
+//	sim.addSubpop(nTotal+1,0);//garbage collector
+	
+	execute_mutation();
+	
+}
+
+2:10000 early() {
+	
+	for (i in 1:nTotal){
+//		sim.subpopulations[nTotal].takeMigrants(sim.subpopulations[i-1].subsetIndividuals(minAge=1));
+	}
+		
+	calculate_fitness_two_loci();
+	
+	// set the fitness of individuals from the last generation to 0
+//	sim.subpopulations[nTotal].individuals.fitnessScaling = 0.0;
+
+}
+
+2:10000 late() {
+
+	if (any(sim.generation == c(seq(1,10000,by=5)))) {
+		output_counts();
+	}
+	
+
+	if ((size(sim.mutations)==0)) {
+		output_counts();
+		sim.simulationFinished();
+	} else {
+		freq_prod = product(sim.mutationFrequencies(sim.subpopulations[0:(nTotal-1)],sim.mutations));
+		if (freq_prod == 1) {
+			output_counts();
+			sim.simulationFinished();
+		}
+	
+	};
+
+//	for (i in 0:(nTotal-1)){
+//		freq = mean(sim.mutationFrequencies(sim.subpopulations[i],sim.mutations));
+//		if ((isNULL(freq)) | (isNAN(freq))){
+//			sim.subpopulations[i].configureDisplay(scale=0.5,color="white");
+//		} else {
+//			sim.subpopulations[i].configureDisplay(scale=0.5,color=colors(freq, "jet"));
+//		}
+//	}
+	
+//	sim.subpopulations[nTotal].configureDisplay(scale=0.1,color="black");
+
+	
+	execute_migration();
+	
+
+}
